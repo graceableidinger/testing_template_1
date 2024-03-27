@@ -1,0 +1,56 @@
+name: Playwright Tests
+on:
+  push:
+    branches: [ main, master ]
+env:
+  PLAYWRIGHT_TEST_BASE_URL: ${{ github.event.deployment_status.target_url }}
+  USER_NAME: ${{ secrets.USERNAME }}
+  PASSWORD: ${{ secrets.PASSWORD }}
+  ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'
+jobs:
+  playwright:
+    name: "Playwright Tests"
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.41.2-jammy
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 18
+    - name: Install dependencies
+      run: npm ci
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+    - name: Run Playwright tests
+      run: USER_NAME=${{env.USER_NAME}} PASSWORD=${{env.PASSWORD}} npx playwright test
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
+  rollback:
+    name: "Rollback"
+    needs: playwright
+    if: failure()
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.41.2-jammy
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 18
+    - name: Add safe directory
+      run: git config --global --add safe.directory /__w/.vscode/.vscode
+    - name: Get recent commit hash
+      id: get_hash 
+      run: echo "::set-env name=HASH::$(git log -1 --pretty=format:'%h')"
+    - name: Create reverted commit
+      run: |
+        git revert ${{env.HASH}}
+    - name: Push reverted commit
+      run: git push
